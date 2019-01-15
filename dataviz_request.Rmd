@@ -1,0 +1,414 @@
+---
+title: "Data viz request"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(tidyr)
+require(ggplot2)
+require(dplyr)
+library(ggthemes)
+library(scales)
+```
+
+## Importing the data
+
+I have saved the results of this procedure in an `RData` file which will be loaded with the following code (you should rename your filepath accordingly):
+
+```{r}
+#load("~/Dropbox/R working directory/raindata workspace.RData") #linux
+load("~/R working directory/raindata workspace.RData") #windows
+table.original <- tabla ## creates a working table saving the original one
+
+```
+
+## Fixing some issues and preparing data
+
+We see that table column names are not appropriate, fixing that
+
+```{r}
+colnames(tabla) <- c("month",tabla[1,-1]) ## assignt the column names to the first row of data
+tabla <- tabla[-1,] ## deletes the first row by subsetting all rows but the first one (symbolized by the minus sign)
+
+```
+
+Now I will use the `gather()` function in order to transform the "wide" format into the "long" format (one row per observation). 
+
+```{r}
+
+my_table <- tabla %>% 
+  ## adding a column for the seasons
+  mutate(season = c("Summer", "Summer", "Autumn", "Autumn", "Autumn", "Winter", "Winter", "Winter", "Spring", "Spring", "Spring", "Summer")) %>%
+   ## sort each monthly observation in a single row
+  gather("Year","Rainfall", c(-month,-season)) %>%
+  subset(select = c(2,1,3,4))
+
+head(my_table)
+
+```
+
+Now I will do some more tidying up in order to R understand better the variables we are using. 
+
+```{r}
+my_table$Year <- as.integer(my_table$Year)
+my_table$month <- factor(my_table$month, levels = month.name)
+my_table$season <-as.factor(my_table$season)
+my_table$season <- factor(my_table$season,  levels =c("Summer","Autumn","Winter","Spring"))
+```
+
+Now I'll create a new categorical variable based on the intervals of the radar values. Since the values are in mm/hr, I'll multiply each interval limit by 24. 
+
+```{r}
+clipvalues <- c(0, 4.8,   12.0,   36.0,   60.0,   96.0,  144.0,  240.0,  360.0,  480.0,  840.0, 1200.0, 1920.0, 2880.0, 4800.0, 7200.0, 8640.0)
+```
+
+The `classIntervals` function from `classInt` package uses fixed breaks. 
+
+```{r}
+require("classInt")
+clippedvalues <- classIntervals(my_table$Rainfall, n = 14, style = "fixed", fixedBreaks = clipvalues)
+
+clippedvalues
+```
+
+```{r}
+my_table$catRainfall <- cut(my_table$Rainfall, clipvalues)
+```
+
+## Creating relevant visualizations
+
+The first graph is a line graph. It uses a graphing package inside R called `ggplot`, in which each layer of a graph is inserted sequentally by a series of commands.
+```{r}
+# Specify which variable will go in each axis. 
+by.year <- ggplot(my_table, aes(x = Year, y=Rainfall))
+
+#Having done that, we'll start adding layers to the base plot. Each layer is added with a plus sign
+by.year + 
+  # stating this will be a line graph
+  geom_line() + 
+  # facet creates a series of graphs, one for each month
+  facet_wrap(~month) +
+  # assign a theme for the plot
+  theme_gdocs() +
+  # specify the labels of each panel
+  labs(title ="Average monthly rainfall for Granpa's house", 
+       x = "Year", 
+       y = "Mean Rainfall (mm/day)") +
+  # further customizing the graph
+  theme(
+    panel.background = element_rect(fill = "grey88",
+                                    colour = "lightblue",
+                                    size = 0.5, linetype = "solid"))
+
+```
+
+Here is another graph, in this case a dot chart, following the same logic of the previous graph.
+
+
+```{r}
+
+by.year + 
+  geom_point(aes(color = catRainfall)) + 
+  facet_wrap(~month) +
+  theme_gdocs() +
+  labs(title ="Average monthly rainfall for Granpa's house", 
+       x = "Year", 
+       y = "Mean Rainfall (mm/day)") +
+  scale_color_discrete(name = "Rainfall level (mm/day)") +
+  theme(
+  panel.background = element_rect(fill = "grey88",
+                                colour = "lightblue",
+                                size = 0.5, linetype = "solid"))
+
+```
+
+```{r}
+year_rainfall_sum <- my_table %>%
+  group_by(Year) %>%
+  summarise(Rainfall = sum(Rainfall, na.rm = T))
+year_rainfall_sum
+mean(year_rainfall_sum$Rainfall)
+```
+
+
+```{r}
+
+bar_year_rainfall <- ggplot(data = year_rainfall_sum,
+  aes(x = Year, y = Rainfall)) +
+  # stat_summary(fun.y = sum, # adds up all observations for the month
+  #   geom = "bar") +# or "line"
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=seq(1993,2018,1),
+                     expand = expand_scale(mult = c(0, 0)),
+                     limits = c(1992, 2019)) +
+  scale_y_continuous(breaks = seq(0,4000,500),
+                     expand = expand_scale(mult = c(0.009, .05))) +
+  theme(axis.text.x = element_text(angle = 90,
+                                   vjust = 0.4),
+  legend.position="bottom")
+bar_year_rainfall
+
+ggsave("bar_year_rainfall.png",
+       plot = bar_year_rainfall,
+       width = 10.5*2,
+       height = 7.425*2,
+       units = "cm",
+       dpi=300)
+
+
+```
+
+```{r}
+bar_year_rainfall_w_avg_line <- bar_year_rainfall +
+  geom_hline(yintercept = mean(year_rainfall_sum$Rainfall),
+                               linetype="dashed",
+                               color = "gray54", 
+                               size=0.5)
+bar_year_rainfall_w_avg_line
+ggsave("bar_year_rainfall_w_avg_line.png",
+       plot = bar_year_rainfall_w_avg_line,
+       width = 10.5*2,
+       height = 7.425*2,
+       units = "cm",
+       dpi=300)
+```
+```{r}
+bar_year_rainfall_w_avg_line_fill <- bar_year_rainfall_w_avg_line +
+  aes(fill = Rainfall > mean(year_rainfall_sum$Rainfall))+
+  scale_fill_brewer(palette = "Paired",  
+                    name = "", 
+                    labels = c("Below average", "Above average"))
+  
+bar_year_rainfall_w_avg_line_fill  
+
+ggsave("bar_year_rainfall_w_avg_line_fill.png",
+       plot = bar_year_rainfall_w_avg_line_fill,
+       width = 10.5*2,
+       height = 7.425*2,
+       units = "cm",
+       dpi=300)
+```
+
+```{r}
+by.month <- ggplot(my_table, 
+                   aes(x = month, 
+                       y=Rainfall,
+                       color = season))
+
+by.month + geom_point()
+```
+
+This graph changes the cartesian graph to a polar one, via the `coord_polar()` function. 
+
+```{r}
+## Average rainfall for each month, the whole period, colored by season
+by.month + 
+  coord_polar() + 
+  stat_summary_bin(fun.y = "mean", 
+                   geom = "bar", 
+                   aes(fill = season)) 
+```
+
+Now the table has an extra column with a factor `catRainfall` that specifies to which binning the variable falls in. 
+
+First, I'll create the palette that was extracted from that government website:
+```{r}
+my_palette <- c("#c9c9c9", "#B4B4FF", "#7878FF", "#1414FF", "#009690", "#006666", "#FFFF00", "#FFC800", "#FF9600", "#FF6400", "#FF0000", "#C80000", "#780000", "#280000")
+```
+
+And now the graph, 
+
+```{r}
+#Setting the base variables
+discrete_graph <- ggplot(my_table, aes(x = month, y = Year))
+
+
+discrete_graph + 
+  coord_polar() + 
+  
+  # this sets the type of graph in which each month represents a tile for the period. 
+  geom_tile(aes(fill = catRainfall )) +
+  
+  # this customize the values to the previously selected palette
+  scale_fill_manual(values = my_palette, name = "Mean rainfall levels (mm/day)") +
+  
+  # customizing labels
+  labs(title ="Average monthly rainfall for Granpa's house", 
+       x = "Month", 
+       y = "Year") +
+  
+  # further customizing
+  theme(
+  panel.background = element_rect(fill = "grey44",
+                                colour = "lightblue",
+                                size = 0.5, linetype = "solid"),
+  panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+  axis.text.x=element_text(colour="grey96")
+  )
+  
+
+  
+```
+
+The following chunk works for saving the last plotted graph. It won't work properly during the knitting process, so I change the `eval` value to false. 
+```{r eval=FALSE}
+heyplot <- last_plot()
+
+ggsave("radial_heatmap_discrete.png", 
+       plot = heyplot, 
+       width = 42/4,
+       height = 29.7/4,
+       units = "cm",
+       dpi="print")
+```
+
+## Latest modifications
+
+```{r}
+monthly_by_year <- by.year + 
+  geom_point(aes(color = catRainfall),show.legend=FALSE) + 
+  facet_wrap(~month) +
+  theme_gdocs() +
+  labs(title ="Rainfall Gauge Data [mm] at Earlville, Cairns, Australia", 
+       x = "Year", 
+       y = "Monthly Rainfall [mm]") +
+  theme(
+  panel.background = element_rect(fill = "grey88",
+                                colour = "lightblue",
+                                size = 0.5, linetype = "solid"),
+  axis.text.x = element_text(angle = 90, 
+                             hjust = 1)
+  ) +
+  scale_x_continuous(breaks=seq(1990,2020,5))
+
+
+monthly_by_year
+
+## Uncomment the following to write an image file to the disk (Ctrl + Shift + C on a selection does the trick)
+
+ggsave("dot_monthly_by_year.png",
+       plot = monthly_by_year,
+       width = 10.5*2,
+       height = 7.425*2,
+       units = "cm",
+       dpi=300)
+```
+
+```{r}
+by.year <- ggplot(my_table, aes(x = Year, y=Rainfall))
+
+dot_by_season <- by.year + 
+  geom_point(aes(color = catRainfall),show.legend=FALSE) + 
+  facet_wrap(~season,ncol = 4) +
+  theme_gdocs() +
+  labs(title ="Rainfall Gauge Data [mm] at Earlville, Cairns, Australia", 
+       x = "Year", 
+       y = "Monthly Rainfall [mm]")  +
+  #scale_y_log10() +
+  theme(
+  panel.background = element_rect(fill = "grey88",
+                                colour = "lightblue",
+                                size = 0.5, linetype = "solid"),
+  axis.text.x = element_text(angle = 90, 
+                             hjust = 1)
+  ) +
+  scale_x_continuous(breaks = seq(1990,2020,5)) +
+  scale_y_continuous(breaks = seq(0,1500,250))
+
+dot_by_season
+dot_by_season_smooth <- dot_by_season + geom_smooth() 
+
+ggsave("dot_monthly_by_season_with_smooth.png",
+       plot = dot_by_season_smooth,
+       width = 10.5*2,
+       height = 7.425*2,
+       units = "cm",
+       dpi=300)
+
+ggsave("dot_monthly_by_season_no_smooth.png",
+       plot = dot_by_season,
+       width = 10.5*2,
+       height = 7.425*2,
+       units = "cm",
+       dpi=300)
+```
+
+```{r}
+
+average_rainfall_radial <- ggplot(my_table, 
+                                  aes(x=month, 
+                                      y=Year)) + 
+  coord_polar() + 
+  geom_tile(aes(fill = Rainfall)) +
+  labs(title ="Rainfall Gauge Data [mm] at Earlville, Cairns, Australia", 
+       x = "Month", 
+       y = "Year") 
+  
+  
+heat_viridis <- average_rainfall_radial + 
+  scale_fill_continuous(type = "viridis", 
+                        name = "Monthly Rainfall [mm]") +
+  scale_x_discrete(labels = toupper(month.abb)) +
+  theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title.x=element_blank(),
+        panel.background = element_rect(fill = "white")
+        )
+  
+
+heat_viridis
+
+## Uncomment the following to write an image file to the disk (Ctrl + Shift + C on a selection does the trick)
+
+ggsave("radial_heatmap_discrete_viridis.png",
+       plot = heat_viridis,
+       width = 10.5*2,
+       height = 7.425*2,
+       units = "cm",
+       dpi=300)
+
+
+```
+
+```{r}
+by.year <- ggplot(my_table, aes(x = Year, y=Rainfall))
+
+dot_by_season <- by.year + 
+  geom_point(aes(color = catRainfall),show.legend=FALSE) + 
+  facet_wrap(~season,ncol = 4) +
+  theme_gdocs() +
+  labs(title ="Rainfall Gauge Data [mm] at Earlville, Cairns, Australia", 
+       x = "Year", 
+       y = "Monthly Rainfall [mm]")  +
+  #scale_y_log10() +
+  theme(
+  panel.background = element_rect(fill = "grey88",
+                                colour = "lightblue",
+                                size = 0.5, linetype = "solid"),
+  axis.text.x = element_text(angle = 90, 
+                             hjust = 1)
+  ) +
+  scale_x_continuous(breaks = seq(1990,2020,5)) +
+  scale_y_continuous(breaks = seq(0,1500,250))
+
+dot_by_season
+dot_by_season_smooth <- dot_by_season + geom_smooth() 
+
+# ggsave("dot_monthly_by_season_with_smooth.png",
+#        plot = dot_by_season_smooth,
+#        width = 10.5*2,
+#        height = 7.425*2,
+#        units = "cm",
+#        dpi=300)
+# 
+# ggsave("dot_monthly_by_season_no_smooth.png",
+#        plot = dot_by_season,
+#        width = 10.5*2,
+#        height = 7.425*2,
+#        units = "cm",
+#        dpi=300)
+```
